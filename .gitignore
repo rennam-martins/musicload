@@ -1,6 +1,9 @@
 ffmpeg.exe
 yt-dlp.exe
 video_links.txt
-playlist_links.txt
 
-output
+output/
+venv/
+.venv/
+__pycache__/
+*.pyc

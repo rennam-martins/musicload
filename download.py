@@ -4,6 +4,7 @@ import requests
 import gdown
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import glob
+import sys
 
 max_simultaneous_downloads = 16
 max_simultaneous_conversions = 8
@@ -12,13 +13,7 @@ YTDLP_URL = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.ex
 FFMPEG_DRIVE_ID = "1SFIIYJSomDBGKfuICx1EkFDu-SxiDIRq"
 
 def check_and_download_executables():
-    if not is_executable_in_path("yt-dlp.exe") and not os.path.exists("yt-dlp.exe"):
-        print("yt-dlp.exe not found. Downloading...")
-        download_file(YTDLP_URL, "yt-dlp.exe")
-    
-    if not is_executable_in_path("ffmpeg.exe") and not os.path.exists("ffmpeg.exe"):
-        print("ffmpeg.exe not found. Downloading from Google Drive with gdown...")
-        download_ffmpeg_from_drive()
+    pass
 
 def is_executable_in_path(executable_name):
     return any(
@@ -40,37 +35,67 @@ def download_ffmpeg_from_drive():
     print("ffmpeg.exe downloaded successfully.")
 
 def extract_video_links():
+    print("Extraindo links dos vídeos da playlist...")
     with open("playlist_links.txt", "r") as playlist_file, open("video_links.txt", "w") as video_file:
         playlists = playlist_file.readlines()
         for playlist in playlists:
-            command = f'yt-dlp --flat-playlist -g -f m4a "{playlist.strip()}"'
+            playlist = playlist.strip()
+            if not playlist:
+                continue
+            command = f'{sys.executable} -m yt_dlp --flat-playlist -g -f m4a "{playlist}"'
             result = subprocess.run(command, shell=True, capture_output=True, text=True)
-            video_file.write(result.stdout)
+            if result.stdout:
+                video_file.write(result.stdout)
+            else:
+                print(f"Aviso: Não foi possível extrair de {playlist}")
+    print("Links extraídos com sucesso!")
 
 def download(link):
-    command = f'yt-dlp -o "output/%(title)s.%(ext)s" -f m4a "{link.strip()}"'
-    subprocess.call(command, shell=True)
+    link = link.strip()
+    if not link:
+        return
+    print(f"Baixando: {link}")
+    os.makedirs("output", exist_ok=True)
+    command = f'{sys.executable} -m yt_dlp -o "output/%(title)s.%(ext)s" -f m4a "{link}"'
+    subprocess.call(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    print(f"Download concluído: {link}")
 
 def convert_file(m4a_file):
+    print(f"Convertendo: {m4a_file}")
     mp3_file = m4a_file.replace(".m4a", ".mp3")
-    command = f'ffmpeg -i "{m4a_file}" -vn -ar 44100 -ac 2 -b:a 128k -threads 4 "{mp3_file}"'
-    subprocess.call(command, shell=True)
+    command = f'ffmpeg -y -i "{m4a_file}" -vn -ar 44100 -ac 2 -b:a 128k -threads 4 "{mp3_file}"'
+    subprocess.call(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     os.remove(m4a_file)
+    print(f"Conversão concluída: {mp3_file}")
 
+print("Iniciando processo...")
 check_and_download_executables()
 
 extract_video_links()
 
-with open("video_links.txt", "r") as file:
-    links = file.readlines()
+print("Lendo links dos vídeos...")
+try:
+    with open("video_links.txt", "r") as file:
+        links = [line.strip() for line in file.readlines() if line.strip()]
+except FileNotFoundError:
+    links = []
 
-with ThreadPoolExecutor(max_workers=max_simultaneous_downloads) as executor:
-    futures = [executor.submit(download, link) for link in links]
-    for future in as_completed(futures):
-        pass
+if not links:
+    print("Nenhum link encontrado para baixar.")
+else:
+    print(f"Iniciando download de {len(links)} vídeos...")
+    with ThreadPoolExecutor(max_workers=max_simultaneous_downloads) as executor:
+        futures = [executor.submit(download, link) for link in links]
+        for future in as_completed(futures):
+            pass
 
-m4a_files = glob.glob("output/*.m4a")
-with ThreadPoolExecutor(max_workers=max_simultaneous_conversions) as executor:
-    futures = [executor.submit(convert_file, m4a_file) for m4a_file in m4a_files]
-    for future in as_completed(futures):
-        pass
+    print("Iniciando conversão para MP3...")
+    m4a_files = glob.glob("output/*.m4a")
+    if not m4a_files:
+        print("Nenhum arquivo .m4a encontrado para converter.")
+    else:
+        with ThreadPoolExecutor(max_workers=max_simultaneous_conversions) as executor:
+            futures = [executor.submit(convert_file, m4a_file) for m4a_file in m4a_files]
+            for future in as_completed(futures):
+                pass
+    print("Processo finalizado com sucesso!")
